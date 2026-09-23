@@ -5,15 +5,10 @@ name: Heartbeat
 # - Commit uses [skip ci] so downstream CI/CodeQL/Scorecard don't fan out.
 # - Purpose: keep the weekly cron alive (GitHub disables schedules after 60 days
 #   of no repo activity). One tiny commit per week per repo is the intended cost.
-# - STAGGERING: the `0` minute below is REWRITTEN per-repo by sourcerepo's
-#   `.github/scripts/sync-selected-paths.sh` to a stable hash-derived value
-#   between 0-59, so the ~60 downstream repos don't all fire at Monday 09:00 UTC
-#   simultaneously (which caused a fleet-wide runner pileup on Aug 3, 2026).
-#   The value stays "0" in sourcerepo itself since nothing rewrites it here.
 
 on:
   schedule:
-    - cron: "14 9 * * 1" # Weekly Monday 09:00 UTC (5pm SGT) — minute staggered per repo
+    - cron: "14 9 * * 1"
   workflow_dispatch:
 
 concurrency:
@@ -27,7 +22,7 @@ jobs:
   heartbeat:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Heartbeat commit (keeps cron alive)
         run: |
           git config user.name "github-actions[bot]"
@@ -35,6 +30,5 @@ jobs:
           echo "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > last_sync.txt
           git add last_sync.txt
           git diff --cached --quiet || git commit -m "chore: sync heartbeat [skip ci]"
-          # Rebase before push in case another workflow raced us.
           git pull --rebase || true
           git push
