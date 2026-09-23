@@ -1,7 +1,7 @@
 # .github/workflows/labeler.yml
 name: "Pull Request Labeler"
 on:
-  pull_request_target: # This trigger is generally safer for labeler actions
+  pull_request_target:
     types:
       - opened
       - reopened
@@ -19,5 +19,4 @@ jobs:
     steps:
       - uses: actions/labeler@v7
         with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
           configuration-path: .github/labels.yml
