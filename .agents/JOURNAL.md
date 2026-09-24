@@ -22,3 +22,6 @@
 
 2026-09-14 — Hosted validation confirmed GitHub matches full Action paths. Replaced only the ineffective CodeQL root policy pattern with its four already-reviewed sub-action paths at the identical SHA: 14 exact patterns for the same 11 repositories. No new code, publisher, revision, wildcard, or pinning relaxation. Build, Dependency Review, LFS Guard and TruffleHog passed; rerun security validation for the corrected policy before release.
 
+
+
+2026-09-24 - portfolio test-coverage pass: added unit tests for the 4 previously-untested src/services modules (autoTagMeasurement, browserStorage, mapLinkService, privacy) as part of a multi-repo cross-pollination effort. 25 new test cases on top of 29 existing ones (54 total). No CI workflow changes needed - ci.yml already runs npm test + npm run build on every push to main and auto-discovers new *.test.ts files. Verified green on real GitHub Actions runners (commit 6cabdea). See STATE.md for a note on a note-vs-name classification-priority subtlety discovered while writing these tests.
