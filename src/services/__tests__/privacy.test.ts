@@ -5,84 +5,117 @@ import {
   stripContributorProfilesFromGetlist,
 } from "../privacy";
 
-// Getlist responses shape place rows as fixed-index arrays; index 12 carries the
-// contributor profile blob we must never persist. These helpers build minimal
-// fixtures matching that shape without hardcoding unrelated indices.
-function makePlaceRow(contributorSlot: unknown): unknown[] {
-  const row = new Array(15).fill(null);
-  row[12] = contributorSlot;
+function makePlaceRow(featureId: string, contributor: unknown = null): unknown[] {
+  // Google Maps getlist place rows are opaque arrays; index 12 is the contributor slot.
+  const row: unknown[] = new Array(15).fill(null);
+  row[0] = featureId;
+  row[12] = contributor;
   return row;
 }
 
-function makeGetlistPayload(places: unknown[]): unknown[] {
-  const wrapper = new Array(9).fill(null);
-  wrapper[8] = places;
-  return [wrapper];
+function makeGetlistPayload(places: unknown[]): unknown {
+  // Getlist shape: data[0][8] is the places array. Real payload is much richer, but the
+  // stripper only walks [0][8], so a minimal shape is enough to exercise every branch.
+  const listHeader: unknown[] = new Array(10).fill(null);
+  listHeader[8] = places;
+  return [listHeader];
 }
 
-describe("stripContributorProfilesFromGetlist", () => {
-  it("nulls out the contributor slot on every place row without mutating the input", () => {
-    const places = [
-      makePlaceRow({ name: "John Doe", photo_url: "https://example.com/john.jpg" }),
-      makePlaceRow({ name: "Jane Roe" }),
+describe("privacy", () => {
+  it("stripContributorProfilesFromGetlist nulls index 12 on every place row", () => {
+    const input = makeGetlistPayload([
+      makePlaceRow("feature-a", { name: "Reviewer One", avatar: "https://example.com/a.jpg" }),
+      makePlaceRow("feature-b", { name: "Reviewer Two" }),
+    ]);
+
+    const stripped = stripContributorProfilesFromGetlist(input) as unknown[];
+
+    const places = (stripped[0] as unknown[])[8] as unknown[][];
+    expect(places[0][12]).toBeNull();
+    expect(places[1][12]).toBeNull();
+  });
+
+  it("stripContributorProfilesFromGetlist does not mutate its input (structuredClone)", () => {
+    const contributor = { name: "Reviewer One" };
+    const originalRow = makePlaceRow("feature-a", contributor);
+    const input = makeGetlistPayload([originalRow]);
+
+    stripContributorProfilesFromGetlist(input);
+
+    // Original input row must still have its contributor slot populated.
+    expect(originalRow[12]).toBe(contributor);
+    const inputPlaces = ((input as unknown[])[0] as unknown[])[8] as unknown[][];
+    expect(inputPlaces[0][12]).toBe(contributor);
+  });
+
+  it("stripContributorProfilesFromGetlist returns non-array inputs unchanged", () => {
+    expect(stripContributorProfilesFromGetlist(null)).toBeNull();
+    expect(stripContributorProfilesFromGetlist("not an array")).toBe("not an array");
+    expect(stripContributorProfilesFromGetlist({ some: "object" })).toEqual({ some: "object" });
+  });
+
+  it("stripContributorProfilesFromGetlist tolerates a payload with no places array at [0][8]", () => {
+    const input: unknown = [["header", "only"]];
+
+    const stripped = stripContributorProfilesFromGetlist(input);
+
+    expect(stripped).toEqual([["header", "only"]]);
+  });
+
+  it("assertContributorProfilesStrippedFromGetlist is silent when every place has a null contributor slot", () => {
+    const clean = makeGetlistPayload([
+      makePlaceRow("feature-a", null),
+      makePlaceRow("feature-b", null),
+    ]);
+
+    expect(() => assertContributorProfilesStrippedFromGetlist(clean)).not.toThrow();
+  });
+
+  it("assertContributorProfilesStrippedFromGetlist throws on a leaking payload", () => {
+    const leaking = makeGetlistPayload([
+      makePlaceRow("feature-a", null),
+      makePlaceRow("feature-b", { name: "Reviewer Two", account_id: "acct-42" }),
+    ]);
+
+    expect(() => assertContributorProfilesStrippedFromGetlist(leaking)).toThrow(
+      /Contributor profile data was not stripped from getlist place index 1/,
+    );
+  });
+
+  it("assertContributorProfilesStrippedFromGetlist is silent when the shape has no places array", () => {
+    expect(() => assertContributorProfilesStrippedFromGetlist(null)).not.toThrow();
+    expect(() => assertContributorProfilesStrippedFromGetlist([["header", "only"]])).not.toThrow();
+  });
+
+  it("assertPlaceRecordsContainNoContributorData is silent on clean records", () => {
+    const clean = [
+      { feature_id: "feature-a", place_name: "A", lat: 1, lng: 2 },
+      { feature_id: "feature-b", place_name: "B" },
+      null,
+      "not-an-object",
     ];
-    const data = makeGetlistPayload(places);
 
-    const stripped = stripContributorProfilesFromGetlist(data) as any[];
-
-    expect(stripped[0][8][0][12]).toBeNull();
-    expect(stripped[0][8][1][12]).toBeNull();
-    // Original input must be untouched (structuredClone, not an in-place mutation).
-    expect((data as any)[0][8][0][12]).toEqual({ name: "John Doe", photo_url: "https://example.com/john.jpg" });
+    expect(() => assertPlaceRecordsContainNoContributorData(clean)).not.toThrow();
   });
 
-  it("returns non-array input unchanged", () => {
-    const input = { foo: "bar" };
-    expect(stripContributorProfilesFromGetlist(input)).toBe(input);
+  it("assertPlaceRecordsContainNoContributorData throws when a record has a contributor-like key", () => {
+    const records = [
+      { feature_id: "feature-a", place_name: "A" },
+      { feature_id: "feature-b", place_name: "B", contributor_name: "Reviewer Two" },
+    ];
+
+    expect(() => assertPlaceRecordsContainNoContributorData(records)).toThrow(
+      /Contributor-like field "contributor_name" cannot be persisted/,
+    );
   });
 
-  it("returns a clone of the input when the expected places array is missing", () => {
-    const input = [[]];
-    const result = stripContributorProfilesFromGetlist(input);
-    expect(result).toEqual([[]]);
-    expect(result).not.toBe(input);
-  });
-});
+  it("assertPlaceRecordsContainNoContributorData catches avatar and account key variants case-insensitively", () => {
+    expect(() =>
+      assertPlaceRecordsContainNoContributorData([{ AvatarUrl: "https://example.com/a.jpg" }]),
+    ).toThrow(/Contributor-like field "AvatarUrl"/);
 
-describe("assertContributorProfilesStrippedFromGetlist", () => {
-  it("throws when a contributor profile is still present", () => {
-    const places = [makePlaceRow(null), makePlaceRow({ name: "Leaked Person" })];
-    const data = makeGetlistPayload(places);
-
-    expect(() => assertContributorProfilesStrippedFromGetlist(data)).toThrow(/place index 1/);
-  });
-
-  it("does not throw once contributor slots are stripped", () => {
-    const places = [makePlaceRow(null), makePlaceRow(null)];
-    const data = makeGetlistPayload(places);
-
-    expect(() => assertContributorProfilesStrippedFromGetlist(data)).not.toThrow();
-  });
-
-  it("does not throw when the payload shape has no recognizable places array", () => {
-    expect(() => assertContributorProfilesStrippedFromGetlist({ unrelated: true })).not.toThrow();
-    expect(() => assertContributorProfilesStrippedFromGetlist([[]])).not.toThrow();
-  });
-});
-
-describe("assertPlaceRecordsContainNoContributorData", () => {
-  it("throws when a record has a contributor-like key", () => {
-    const records = [{ name: "Clean" }, { contributorName: "Leaked" }];
-    expect(() => assertPlaceRecordsContainNoContributorData(records)).toThrow(/contributorName/);
-  });
-
-  it("throws on avatar/account keys as well, case-insensitively", () => {
-    expect(() => assertPlaceRecordsContainNoContributorData([{ AvatarUrl: "x" }])).toThrow();
-    expect(() => assertPlaceRecordsContainNoContributorData([{ account_id: "x" }])).toThrow();
-  });
-
-  it("does not throw for clean records, including non-object entries", () => {
-    const records = [{ name: "Clean" }, null, "not-a-record", 42];
-    expect(() => assertPlaceRecordsContainNoContributorData(records)).not.toThrow();
+    expect(() =>
+      assertPlaceRecordsContainNoContributorData([{ account_id: "acct-42" }]),
+    ).toThrow(/Contributor-like field "account_id"/);
   });
 });

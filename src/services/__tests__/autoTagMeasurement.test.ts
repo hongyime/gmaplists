@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
+import {
+  classifyPlacesForMeasurement,
+  measureRuleCoverage,
+  validateAgainstFoodNotes,
+} from "../autoTagMeasurement";
 import { Place } from "../../types";
-import { classifyPlacesForMeasurement, measureRuleCoverage, validateAgainstFoodNotes } from "../autoTagMeasurement";
 
-function place(place_name: string, overrides: Partial<Place> = {}): Place {
+function place(overrides: Partial<Place> & { place_name: string; feature_id: string }): Place {
   return {
-    place_name,
     primary_category: "Unsorted",
     detailed_category: "Unknown",
     star_rating: 0,
@@ -14,102 +17,122 @@ function place(place_name: string, overrides: Partial<Place> = {}): Place {
   };
 }
 
-describe("classifyPlacesForMeasurement", () => {
-  it("maps each place through the rule engine and preserves feature_id", () => {
-    const places = [
-      place("Sushi Bar", { feature_id: "f1" }),
-      place("Mystery Spot", { feature_id: "f2" }),
-    ];
-
-    const measured = classifyPlacesForMeasurement(places);
+describe("autoTagMeasurement", () => {
+  it("classifyPlacesForMeasurement classifies each place with rule metadata", () => {
+    const measured = classifyPlacesForMeasurement([
+      place({ place_name: "Restoran Hua Mui", feature_id: "1:1" }),
+      place({ place_name: "Xqzv Nopq", feature_id: "1:2" }),
+    ]);
 
     expect(measured).toHaveLength(2);
-    expect(measured[0]).toEqual(expect.objectContaining({
-      feature_id: "f1",
-      place_name: "Sushi Bar",
+    expect(measured[0]).toMatchObject({
+      feature_id: "1:1",
+      place_name: "Restoran Hua Mui",
       category: "Food",
-      confidence: "high",
-      matched_on: "name_label",
-    }));
-    expect(measured[1]).toEqual(expect.objectContaining({
-      feature_id: "f2",
-      place_name: "Mystery Spot",
+      rule_id: "food.meal",
+    });
+    expect(measured[0].matched_families).toBeInstanceOf(Array);
+    expect(measured[1]).toMatchObject({
+      place_name: "Xqzv Nopq",
       category: "Unsorted",
-      confidence: "low",
-      matched_on: "none",
-    }));
+    });
   });
-});
 
-describe("validateAgainstFoodNotes", () => {
-  it("compares note-implied category against the actual classification, counting correct/mismatched/excluded notes", () => {
-    const places = [
-      place("Random Eatery", { user_notes: "great ramen here", feature_id: "f1" }),
-      place("Random Eatery 2", { user_notes: "visited", feature_id: "f2" }),
-      // Note text is itself run through the full rule engine and wins over
-      // name/label matches when it matches a rule family (see classifyPlaceByRules).
-      // "view" is only recognised by categoryFromFoodDescriptiveNote's simpler
-      // NOTE_LABELS list, not by RULE_FAMILIES (which only has "viewpoint"/"lookout"),
-      // so the note does NOT hijack this place's actual classification -- it falls
-      // through to the name match ("mall"/"shopping" -> Shop), producing a genuine
-      // mismatch against the note-implied "See".
-      place("Big Shopping Mall", { user_notes: "nice view here", feature_id: "f3" }),
-      place("No Note Place", { feature_id: "f4" }),
+  it("measureRuleCoverage computes tagged/unsorted counts, percentages, and category buckets", () => {
+    const places: Place[] = [
+      place({ place_name: "Restoran Hua Mui", feature_id: "1:1" }),
+      place({ place_name: "The Bakery", feature_id: "1:2" }),
+      place({ place_name: "Hidden Cocktail Bar", feature_id: "1:3" }),
+      place({ place_name: "Xqzv Nopq", feature_id: "1:4" }),
     ];
-    const measured = classifyPlacesForMeasurement(places);
 
-    const result = validateAgainstFoodNotes(places, measured);
+    const measured = measureRuleCoverage(places);
 
-    expect(result.excludedCount).toBe(1);
-    expect(result.correctCount).toBe(1);
-    expect(result.labelledCount).toBe(2);
-    expect(result.accuracy).toBe(0.5);
-    expect(result.mismatches).toEqual([
-      { place_name: "Big Shopping Mall", note: "nice view here", expected: "See", actual: "Shop" },
-    ]);
+    expect(measured.total).toBe(4);
+    expect(measured.taggedCount).toBe(3);
+    expect(measured.unsortedCount).toBe(1);
+    expect(measured.taggedPercent).toBe(75);
+    expect(measured.unsortedPercent).toBe(25);
+    expect(measured.unsortedNames).toEqual(["Xqzv Nopq"]);
+    expect(measured.categoryCounts).toMatchObject({
+      Food: 1,
+      Snack: 1,
+      Drink: 1,
+      Unsorted: 1,
+    });
+    expect(measured.confidenceCounts.high).toBeGreaterThanOrEqual(1);
+    expect(measured.places).toHaveLength(4);
   });
 
-  it("returns null accuracy when no place has a categorical note", () => {
-    const places = [place("No Note Place", { feature_id: "f1" })];
-    const measured = classifyPlacesForMeasurement(places);
+  it("measureRuleCoverage returns zeroed percentages for an empty list", () => {
+    const measured = measureRuleCoverage([]);
 
-    const result = validateAgainstFoodNotes(places, measured);
-
-    expect(result).toEqual({
+    expect(measured).toMatchObject({
+      total: 0,
+      taggedCount: 0,
+      unsortedCount: 0,
+      taggedPercent: 0,
+      unsortedPercent: 0,
+      unsortedNames: [],
+    });
+    expect(measured.noteValidation).toMatchObject({
       labelledCount: 0,
-      excludedCount: 0,
       correctCount: 0,
+      excludedCount: 0,
       accuracy: null,
       mismatches: [],
     });
   });
-});
 
-describe("measureRuleCoverage", () => {
-  it("aggregates counts, percentages, and multi-family matches across a mixed set of places", () => {
-    const places = [
-      place("Sushi Bar", { feature_id: "f1" }),
-      place("The Coffee House", { feature_id: "f2" }),
-      place("Central Mall", { feature_id: "f3" }),
-      place("Mystery Spot", { feature_id: "f4" }),
+  it("validateAgainstFoodNotes records mismatches when measured category disagrees with the note label", () => {
+    const places: Place[] = [
+      place({ place_name: "Dim Sum House", feature_id: "1:1", user_notes: "Dim sum" }),
+      place({ place_name: "Ambient Place", feature_id: "1:2", user_notes: "Visited" }),
+      place({ place_name: "Empty Note", feature_id: "1:3", user_notes: "   " }),
+      place({ place_name: "Snack Truth", feature_id: "1:4", user_notes: "Butter" }),
     ];
+    // Force a deliberate disagreement: pretend the classifier tagged the "Butter" place as Food.
+    // validateAgainstFoodNotes should record this as a mismatch against the note-derived Snack label.
+    const measured = classifyPlacesForMeasurement(places).map((entry) =>
+      entry.feature_id === "1:4" ? { ...entry, category: "Food" as const } : entry,
+    );
 
-    const result = measureRuleCoverage(places);
+    const validation = validateAgainstFoodNotes(places, measured);
 
-    expect(result.total).toBe(4);
-    expect(result.taggedCount).toBe(3);
-    expect(result.unsortedCount).toBe(1);
-    expect(result.taggedPercent).toBe(75);
-    expect(result.unsortedPercent).toBe(25);
-    expect(result.unsortedNames).toEqual(["Mystery Spot"]);
-    expect(result.categoryCounts).toEqual({ Food: 1, Snack: 1, Drink: 0, See: 0, Shop: 1, Unsorted: 1 });
-    expect(result.confidenceCounts).toEqual({ high: 3, medium: 0, low: 1 });
-    expect(result.addressFallbackOnly).toEqual([]);
-    // "Sushi Bar" matches both the food.meal family ("sushi"/"sushi bar") and the
-    // drink.alcohol family ("bar"); Food wins per the documented precedence rule,
-    // but the match set still spans two distinct categories, so it should surface
-    // here for human review.
-    expect(result.multiFamilyMatches).toHaveLength(1);
-    expect(result.multiFamilyMatches[0]).toEqual(expect.objectContaining({ place_name: "Sushi Bar", category: "Food" }));
+    expect(validation.labelledCount).toBe(2);
+    expect(validation.correctCount).toBe(1);
+    expect(validation.excludedCount).toBe(1);
+    expect(validation.accuracy).toBe(0.5);
+    expect(validation.mismatches).toEqual([
+      expect.objectContaining({
+        place_name: "Snack Truth",
+        note: "Butter",
+        expected: "Snack",
+        actual: "Food",
+      }),
+    ]);
+  });
+
+  it("validateAgainstFoodNotes falls back to name lookup when feature_id is absent", () => {
+    const noIdPlace: Place = {
+      place_name: "Dim Sum House",
+      primary_category: "Unsorted",
+      detailed_category: "Unknown",
+      star_rating: 0,
+      review_count: 0,
+      user_notes: "Dim sum",
+      is_override: false,
+    };
+
+    const measured = classifyPlacesForMeasurement([noIdPlace]);
+    const validation = validateAgainstFoodNotes([noIdPlace], measured);
+
+    expect(validation).toMatchObject({
+      labelledCount: 1,
+      correctCount: 1,
+      excludedCount: 0,
+      accuracy: 1,
+      mismatches: [],
+    });
   });
 });

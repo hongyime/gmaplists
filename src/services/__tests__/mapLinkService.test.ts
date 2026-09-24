@@ -1,36 +1,42 @@
 import { describe, expect, it } from "vitest";
 import { getCleanListUrl } from "../mapLinkService";
 
-describe("getCleanListUrl", () => {
-  it("returns null when the URL is already a clean userlists URL", async () => {
-    const result = await getCleanListUrl("https://www.google.com/local/userlists/list/abc123");
-    expect(result).toBeNull();
+describe("mapLinkService", () => {
+  it("returns null when the input is already a clean userlists URL", async () => {
+    const url = "https://www.google.com/local/userlists/list/AF1QipNabcdefghijklmnop";
+    expect(await getCleanListUrl(url)).toBeNull();
   });
 
-  it("extracts the list ID from a direct /list/<id> URL path", async () => {
-    const result = await getCleanListUrl("https://maps.app.goo.gl/list/AbCdEfGhIjKlMnOp");
-    expect(result).toBe("https://www.google.com/local/userlists/list/AbCdEfGhIjKlMnOp");
+  it("extracts the list ID from the direct list/<id> URL pattern", async () => {
+    const url = "https://maps.app.goo.gl/somepath/list/AF1QipNabcdefghijklmnop?extra=1";
+    expect(await getCleanListUrl(url)).toBe(
+      "https://www.google.com/local/userlists/list/AF1QipNabcdefghijklmnop",
+    );
   });
 
   it("extracts the list ID from the !2s<id>! data parameter pattern", async () => {
-    const result = await getCleanListUrl(
-      "https://www.google.com/maps/@1,2,3z/data=!3m1!4b1!2sAbCdEfGhIjKlMnOp!5s",
+    const url =
+      "https://www.google.com/maps/data=!4m1!1e2!2sCAESGkFGMVFpcE5hYmNkZWZnaGlqa2xtbm9wcXI!3m0";
+    expect(await getCleanListUrl(url)).toBe(
+      "https://www.google.com/local/userlists/list/CAESGkFGMVFpcE5hYmNkZWZnaGlqa2xtbm9wcXI",
     );
-    expect(result).toBe("https://www.google.com/local/userlists/list/AbCdEfGhIjKlMnOp");
   });
 
-  it("extracts the list ID from the [null,\"<id>\",3] JSON-in-HTML pattern", async () => {
-    const result = await getCleanListUrl('<script>var x=[null,"AbCdEfGhIjKlMnOp",3];</script>');
-    expect(result).toBe("https://www.google.com/local/userlists/list/AbCdEfGhIjKlMnOp");
+  it("extracts the list ID from the [null,\"<id>\",3] APP_INITIALIZATION_STATE JSON pattern", async () => {
+    const html =
+      'window.APP_INITIALIZATION_STATE=[["something",[null,"AF1QipNabcdefghijklmnop",3],"tail"]];';
+    expect(await getCleanListUrl(html)).toBe(
+      "https://www.google.com/local/userlists/list/AF1QipNabcdefghijklmnop",
+    );
   });
 
-  it("rejects matches that are too short to be a real list ID (sanity check)", async () => {
-    const result = await getCleanListUrl("https://maps.google.com/list/short");
-    expect(result).toBeNull();
+  it("rejects short false-positive matches that fail the length>10 sanity check", async () => {
+    const url = "https://example.com/list/short_id";
+    expect(await getCleanListUrl(url)).toBeNull();
   });
 
-  it("returns null when no pattern matches at all", async () => {
-    const result = await getCleanListUrl("https://example.com/foo/bar");
-    expect(result).toBeNull();
+  it("returns null when no pattern matches", async () => {
+    expect(await getCleanListUrl("https://example.com/no-list-here")).toBeNull();
+    expect(await getCleanListUrl("")).toBeNull();
   });
 });

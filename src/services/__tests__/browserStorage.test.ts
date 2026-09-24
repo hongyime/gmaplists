@@ -1,51 +1,76 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readStorage, writeStorage } from "../browserStorage";
 
-describe("browserStorage", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
-  it("returns null on read when window is not defined (SSR)", () => {
+function stubWindowWithLocalStorage(store: Record<string, string>) {
+  vi.stubGlobal("window", {
+    localStorage: {
+      getItem: (key: string) => (key in store ? store[key] : null),
+      setItem: (key: string, value: string) => {
+        store[key] = value;
+      },
+      removeItem: (key: string) => {
+        delete store[key];
+      },
+      clear: () => {
+        for (const key of Object.keys(store)) delete store[key];
+      },
+    },
+  });
+}
+
+describe("browserStorage", () => {
+  it("readStorage returns null when window is undefined (SSR guard)", () => {
     expect(readStorage("any-key")).toBeNull();
   });
 
-  it("does nothing on write when window is not defined (SSR)", () => {
-    expect(() => writeStorage("any-key", "value")).not.toThrow();
+  it("writeStorage is a no-op when window is undefined (SSR guard)", () => {
+    expect(() => writeStorage("any-key", "any-value")).not.toThrow();
   });
 
-  it("reads a value from window.localStorage when available", () => {
-    const getItem = vi.fn().mockReturnValue("stored-value");
-    vi.stubGlobal("window", { localStorage: { getItem } });
+  it("readStorage returns the stored value via window.localStorage", () => {
+    const store: Record<string, string> = { greeting: "hello" };
+    stubWindowWithLocalStorage(store);
 
-    expect(readStorage("my-key")).toBe("stored-value");
-    expect(getItem).toHaveBeenCalledWith("my-key");
+    expect(readStorage("greeting")).toBe("hello");
+    expect(readStorage("missing")).toBeNull();
   });
 
-  it("returns null when localStorage.getItem is unavailable or throws", () => {
-    const getItem = vi.fn().mockImplementation(() => {
-      throw new Error("Storage is blocked");
+  it("writeStorage persists the value via window.localStorage", () => {
+    const store: Record<string, string> = {};
+    stubWindowWithLocalStorage(store);
+
+    writeStorage("greeting", "hola");
+
+    expect(store.greeting).toBe("hola");
+  });
+
+  it("readStorage returns null when localStorage.getItem throws (private mode fallback)", () => {
+    vi.stubGlobal("window", {
+      localStorage: {
+        getItem: () => {
+          throw new Error("SecurityError");
+        },
+        setItem: () => {},
+      },
     });
-    vi.stubGlobal("window", { localStorage: { getItem } });
 
-    expect(readStorage("my-key")).toBeNull();
+    expect(readStorage("greeting")).toBeNull();
   });
 
-  it("writes a value to window.localStorage when available", () => {
-    const setItem = vi.fn();
-    vi.stubGlobal("window", { localStorage: { setItem } });
-
-    writeStorage("my-key", "my-value");
-
-    expect(setItem).toHaveBeenCalledWith("my-key", "my-value");
-  });
-
-  it("swallows errors when localStorage.setItem throws (private mode / locked-down webview)", () => {
-    const setItem = vi.fn().mockImplementation(() => {
-      throw new Error("QuotaExceededError");
+  it("writeStorage swallows errors when localStorage.setItem throws (locked-down webview)", () => {
+    vi.stubGlobal("window", {
+      localStorage: {
+        getItem: () => null,
+        setItem: () => {
+          throw new Error("QuotaExceededError");
+        },
+      },
     });
-    vi.stubGlobal("window", { localStorage: { setItem } });
 
-    expect(() => writeStorage("my-key", "my-value")).not.toThrow();
+    expect(() => writeStorage("greeting", "hola")).not.toThrow();
   });
 });
