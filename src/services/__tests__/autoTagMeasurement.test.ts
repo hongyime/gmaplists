@@ -46,7 +46,14 @@ describe("validateAgainstFoodNotes", () => {
     const places = [
       place("Random Eatery", { user_notes: "great ramen here", feature_id: "f1" }),
       place("Random Eatery 2", { user_notes: "visited", feature_id: "f2" }),
-      place("Quiet Museum", { user_notes: "amazing bar scene", feature_id: "f3" }),
+      // Note text is itself run through the full rule engine and wins over
+      // name/label matches when it matches a rule family (see classifyPlaceByRules).
+      // "view" is only recognised by categoryFromFoodDescriptiveNote's simpler
+      // NOTE_LABELS list, not by RULE_FAMILIES (which only has "viewpoint"/"lookout"),
+      // so the note does NOT hijack this place's actual classification -- it falls
+      // through to the name match ("mall"/"shopping" -> Shop), producing a genuine
+      // mismatch against the note-implied "See".
+      place("Big Shopping Mall", { user_notes: "nice view here", feature_id: "f3" }),
       place("No Note Place", { feature_id: "f4" }),
     ];
     const measured = classifyPlacesForMeasurement(places);
@@ -58,7 +65,7 @@ describe("validateAgainstFoodNotes", () => {
     expect(result.labelledCount).toBe(2);
     expect(result.accuracy).toBe(0.5);
     expect(result.mismatches).toEqual([
-      { place_name: "Quiet Museum", note: "amazing bar scene", expected: "Drink", actual: "See" },
+      { place_name: "Big Shopping Mall", note: "nice view here", expected: "See", actual: "Shop" },
     ]);
   });
 
