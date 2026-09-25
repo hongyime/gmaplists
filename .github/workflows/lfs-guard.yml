@@ -3,7 +3,7 @@ name: LFS Guard
 # LFS ACCIDENT PREVENTION (2026-07-07):
 # Fails any push or PR that adds Git LFS pointer files. The 3-repo LFS
 # cleanup (pokemoncards 11.6 GB, nusnetID2021 210 MB, sgWerkzPhotography2021
-# 75 MB) is expensive to undo - this guard blocks new occurrences at the
+# 75 MB) is expensive to undo — this guard blocks new occurrences at the
 # source.
 #
 # OPT-OUT: add the GitHub topic `keep-lfs` to this repo:
@@ -36,14 +36,14 @@ jobs:
           echo "Topics: ${TOPICS:-none}"
           if [[ ",$TOPICS," == *",keep-lfs,"* ]]; then
             echo "opt_out=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::Repo has 'keep-lfs' topic  LFS guard is a no-op."
+            echo "::notice::Repo has 'keep-lfs' topic → LFS guard is a no-op."
           else
             echo "opt_out=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Checkout
         if: steps.opt-out.outputs.opt_out != 'true'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           # The guard reads only the current index, including a PR merge checkout.
           fetch-depth: 1
@@ -66,11 +66,11 @@ jobs:
             echo "Files:"
             echo "$POINTERS"
             echo ""
-            echo "This repository uses the sourcerepo prevention policy - no LFS."
+            echo "This repository uses the sourcerepo prevention policy — no LFS."
             echo "Fix options:"
             echo "  1. Remove the file (git rm) and store externally (S3/R2/CDN)."
             echo "  2. If LFS is genuinely required, opt out with:"
             echo "     gh repo edit ${{ github.repository }} --add-topic keep-lfs"
             exit 1
           fi
-          echo "? No LFS pointer files found."
+          echo "✅ No LFS pointer files found."
